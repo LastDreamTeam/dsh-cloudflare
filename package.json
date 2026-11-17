@@ -13,6 +13,7 @@
     "url": "https://github.com/LastDreamTeam/dsh-cloudflare-api-mcp/issues"
   },
   "exports": {
+    "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },

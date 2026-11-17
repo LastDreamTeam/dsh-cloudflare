@@ -24,7 +24,7 @@ Restart the profile after installation.
 
 ## First-run authorization
 
-The first time the MCP client starts, `mcp-remote` opens a browser window so you can sign in with your Cloudflare account and grant access. After that, tokens are stored under `~/.mcp-auth/cloudflare-api` (`%USERPROFILE%\\.mcp-auth\\cloudflare-api` on Windows). Re-authorization uses the same flow if the stored tokens expire.
+The first time the MCP client starts, `mcp-remote` opens a browser window so you can sign in with your Cloudflare account and grant access. After that, tokens are stored under `~/.mcp-auth/cloudflare-api` in the user home directory (the same path on Windows). Re-authorization uses the same flow if the stored tokens expire.
 
 The official endpoint is `https://mcp.cloudflare.com/mcp` (HTTP-only transport). The plugin waits up to 10 minutes for the first-run sign-in.
 
