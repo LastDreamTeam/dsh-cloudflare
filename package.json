@@ -1,0 +1,43 @@
+{
+  "name": "dsh-cloudflare-api-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Connects DeepSeek Harness to the official Cloudflare API MCP (DNS, Workers, R2 and more) with browser OAuth.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LastDreamTeam/dsh-cloudflare-api-mcp.git"
+  },
+  "homepage": "https://github.com/LastDreamTeam/dsh-cloudflare-api-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/LastDreamTeam/dsh-cloudflare-api-mcp/issues"
+  },
+  "exports": {
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "bin/launch.mjs"
+  ],
+  "bin": {
+    "dsh-cloudflare-api-mcp": "bin/launch.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "mcp-remote": "^0.16.6"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cloudflare",
+    "mcp",
+    "oauth"
+  ]
+}
