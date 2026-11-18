@@ -153,7 +153,7 @@ window.__ModuleLoader__.load({
           add(kind === 'token' ? { label, apiToken } : { label }, scope);
         },
       },
-      field(copy.displayName, h('input', { name: 'label', required: true, maxLength: 60, style: control, disabled, autoFocus: true })),
+      field(copy.displayName, h('input', { name: 'label', required: true, maxLength: 80, style: control, disabled, autoFocus: true })),
       field(copy.authMethod, h('select', { value: kind, onChange: event => setKind(event.target.value), style: control, disabled },
         h('option', { value: 'oauth' }, copy.oauth), h('option', { value: 'token' }, copy.token))),
       kind === 'oauth'
@@ -178,8 +178,9 @@ window.__ModuleLoader__.load({
         h('div', { style: styles.row }, h('strong', null, label), h('span', { style: styles.meta }, id)),
         h('p', { role: 'status', style: styles.meta },
           [oauth ? copy.oauth : copy.token, copy[status] ?? copy.unknown, identityLabel].filter(Boolean).join(' · ')),
-        status === 'pending' && authorizeUrl &&
-          h('a', { href: authorizeUrl, target: '_blank', rel: 'noopener noreferrer', style: styles.link }, copy.browser),
+        status === 'pending' && (authorizeUrl
+          ? h('a', { href: authorizeUrl, target: '_blank', rel: 'noopener noreferrer', style: styles.link }, copy.browser)
+          : h('div', { style: styles.row }, connectionButton(copy.browser, () => authorize(id, scope), disabled))),
         action === '' && h('div', { style: styles.row },
           ...(oauth && status !== 'pending' ? [connectionButton(copy.authorize, () => setAction('authorize'), disabled)] : []),
           connectionButton(copy.check, () => act('/test', { id }), disabled || status === 'pending'),
@@ -198,7 +199,7 @@ window.__ModuleLoader__.load({
             if (nextLabel && await act('/rename', { id, label: nextLabel })) clear();
           },
         },
-        field(copy.displayName, h('input', { name: 'label', defaultValue: label, required: true, maxLength: 60, style: control, disabled, autoFocus: true })),
+        field(copy.displayName, h('input', { name: 'label', defaultValue: label, required: true, maxLength: 80, style: control, disabled, autoFocus: true })),
         h('div', { style: styles.row },
           connectionButton(copy.save, undefined, disabled, { type: 'submit', primary: true }),
           connectionButton(copy.cancel, clear, disabled))),
