@@ -23,19 +23,25 @@ dsh plugin --profile web add github:LastDreamTeam/dsh-cloudflare
 
 在命令行地址末尾加 `#<commit-sha>` 可以固定到指定提交。插件从 GitHub 分发，目标宿主版本为 DSH 0.2.2-rc.1。独立运行 DSH 需要 Node.js 24.9 或更高版本。
 
+### 更新插件
+
+通过 GitHub 链接安装的插件，可在 DSH 插件列表中卸载后，用同一个链接在原配置中重新安装。已绑定的 Cloudflare 连接会保存在该配置中。
+
 ### 从 1.x 升级
 
 先在目标配置中卸载 `dsh-cloudflare-api-mcp`，再安装 `dsh-cloudflare`，并在设置面板重新授权。2.0.0 使用新的包名，在当前 DSH 配置目录存储凭据。如需清理原来的 `mcp-remote` 凭据，请单独处理旧目录。
 
 ## 绑定 Cloudflare 账号
 
-打开 **设置 → Cloudflare**，添加连接并起一个便于在对话中指明的名称，例如 `生产` 或 `预发布`。选择浏览器 OAuth，在 Cloudflare 页面授权该连接需要的权限。请在运行 DSH 的同一台机器上打开浏览器，以便完成本机回调。绑定另一位 Cloudflare 用户时，可以切换登录账号或使用独立的浏览器配置。
+打开 **设置 → Cloudflare**，点击 **添加账号** 启动浏览器授权。完成登录后，面板会显示经 Cloudflare 验证的账号名称或邮箱。绑定另一个账号时，可切换 Cloudflare 登录账号或使用独立浏览器配置。请在运行 DSH 的同一台机器上完成授权，以便浏览器回调到 DSH。
 
-OAuth 表单默认填入 `zone.read` 和 `dns.write`，用于查找域名站点和修改 DNS。可按需求调整权限，再到 Cloudflare 授权页核对。**Minimal** 用于识别登录身份和账号，展开 **Advanced** 可查看各项权限。如果后续操作需要额外权限，请用所需权限重新授权。绑定不同的 Cloudflare 身份时，请新建连接。 [Cloudflare MCP 授权说明](https://github.com/cloudflare/mcp/blob/main/AGENTS.md#authentication)
+在 Cloudflare 官方授权页面选择所需权限。页面提供仅识别身份和账号、只读访问、完整访问三种预设。展开 **Advanced** 可以授予具体权限，例如修改 DNS 所需的 `zone.read` 和 `dns.write`。登录完成后，DSH 会显示 Cloudflare 返回的 OAuth 权限。后续需要更多权限时，可以重新授权。 [Cloudflare MCP 授权说明](https://github.com/cloudflare/mcp/blob/main/AGENTS.md#authentication)
 
-也可以在设置面板添加限定权限的 Cloudflare API Token，只授权该连接实际需要的账号、Zone 和操作。如果使用账号级 Token，请授予 **Account Resources → Read**，以便官方 MCP 自动识别账号。官方 MCP 当前不支持启用了客户端 IP 地址限制的 API Token。 [Cloudflare MCP Token 设置](https://github.com/cloudflare/mcp#option-2-api-token)
+面板显示等待授权时，请在浏览器中完成登录。如果浏览器没有打开，可点击面板中的 **打开 Cloudflare 授权页**。点击 **测试连接** 可以检查当前状态。测试成功会显示已验证的身份，授权仍在等待或连接失败时会显示对应提示。
 
-可在设置面板逐个重命名、测试或移除连接。凭据保存在当前 DSH 配置目录，Agent 工具的输入和响应均不会包含凭据。POSIX 系统上的凭据文件仅允许所有者访问，Windows 则使用配置目录的访问权限。移除连接会清除本地凭据。Cloudflare 端的 OAuth 授权或 API Token 可在 Cloudflare 中管理。
+如需使用令牌，可点击 **添加 API 令牌** 并填写连接名称，例如 `预发布`。令牌连接可在面板中改名。请按实际需要限定该令牌可访问的账号、Zone 和权限。如果使用账号级 Token，请授予 **Account Resources → Read**，以便官方 MCP 自动识别账号。使用 API Token 时，Cloudflare MCP 当前要求关闭客户端 IP 地址限制。 [Cloudflare MCP Token 设置](https://github.com/cloudflare/mcp#option-2-api-token)
+
+凭据保存在当前 DSH 配置目录，Agent 工具的输入和响应均不会包含凭据。POSIX 系统上的凭据文件仅允许所有者访问，Windows 则使用配置目录的访问权限。移除连接会清除本地凭据。Cloudflare 端的 OAuth 授权或 API Token 可在 Cloudflare 中管理。
 
 ## 让 Agent 管理资源
 
@@ -51,7 +57,7 @@ OAuth 表单默认填入 `zone.read` 和 `dns.write`，用于查找域名站点�
 
 可以直接用自然语言指定连接、域名、记录及改动。
 
-> 用「预发布」连接，在目标 Cloudflare 账号里找到 `example.com`，先查看 `app.example.com` 现有的 A 记录。把这条记录的地址改成 `192.0.2.10`，保留 TTL 和代理设置，再读回结果验证。
+> 用 `staging@example.com` 对应的 Cloudflare 连接，在目标 Cloudflare 账号里找到 `example.com`，先查看 `app.example.com` 现有的 A 记录。把这条记录的地址改成 `192.0.2.10`，保留 TTL 和代理设置，再读回结果验证。
 
 管理 DNS 时，可用 **Zone Read** 查找域名站点，用 **DNS Write** 新增、修改或删除记录。创建或管理站点本身需要 **Zone Write**。Workers、存储、缓存和 SSL/TLS 等产品有各自的权限，可以用 `search` 查询对应接口的要求。 [API Token 权限](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) · [DNS API](https://developers.cloudflare.com/api/resources/dns/subresources/records/)
 

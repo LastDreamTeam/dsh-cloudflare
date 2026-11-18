@@ -4,27 +4,40 @@ window.__ModuleLoader__.load({
   factory(require) {
     const { createElement: h, useEffect, useRef, useState } = require('react');
     const API = '/api/lastdreamteam/cloudflare';
-    const DNS_SCOPE = 'zone.read dns.read dns.write';
-    const SCOPE_REFERENCE = 'https://mcp.cloudflare.com/.well-known/oauth-authorization-server';
+    const connectionErrors = new Set([
+      'authorizationPending', 'authorizationRequired', 'credentialRejected',
+      'permissionDenied', 'identityMismatch', 'testFailed',
+    ]);
     const messages = {
       en: {
-        title: 'Cloudflare connections',
-        intro: 'Give each connection a name so agents can target the right Cloudflare account.',
-        add: 'Add connection',
+        title: 'Cloudflare accounts',
+        intro: 'Connect the Cloudflare accounts you want agents to manage.',
+        add: 'Add account',
+        addToken: 'Add API token',
+        account: 'Cloudflare account',
+        pendingAccount: 'Cloudflare account awaiting authorization',
         displayName: 'Connection name',
-        authMethod: 'Sign-in method',
+        tokenName: 'Token name',
         oauth: 'Browser OAuth',
         token: 'API token',
-        scope: 'Additional OAuth permissions',
-        scopeHelp: 'Separate scopes with spaces. The defaults cover zone lookup and DNS editing.',
-        scopeReference: 'Cloudflare scope reference',
+        granted: 'Granted permissions',
         apiToken: 'Cloudflare API token',
-        connect: 'Connect',
         save: 'Save',
         cancel: 'Cancel',
-        authorize: 'Authorize',
+        authorize: 'Authorize again',
+        authorizing: 'Opening Cloudflare authorization…',
         browser: 'Open Cloudflare authorization',
         check: 'Test connection',
+        testing: 'Testing connection…',
+        testSucceeded: 'Connection test passed.',
+        testFailed: 'Connection test failed. Check the Cloudflare authorization or API token and retry.',
+        authorizationPending: 'Finish authorization in your browser, then test the connection again.',
+        authorizationRequired: 'Authorize this account before testing the connection.',
+        credentialRejected: 'Cloudflare rejected the credentials. Authorize again or check the API token.',
+        permissionDenied: 'Cloudflare denied access. Check the permissions granted to this connection.',
+        identityMismatch: 'Cloudflare returned a different account. Sign in with the account linked to this connection.',
+        authorizationStartFailed: 'Could not start Cloudflare authorization. Try again.',
+        authorizationFailed: 'Cloudflare authorization failed. Authorize the account again.',
         rename: 'Rename',
         remove: 'Disconnect',
         confirmRemove: 'Remove this connection and its saved credentials from DSH?',
@@ -40,23 +53,34 @@ window.__ModuleLoader__.load({
         unavailable: 'Could not reach the Cloudflare settings service. Check that the plugin is enabled.',
       },
       zh: {
-        title: 'Cloudflare 连接',
-        intro: '给每个连接取一个名称，方便 Agent 指定要操作的 Cloudflare 账号。',
-        add: '添加连接',
+        title: 'Cloudflare 账号',
+        intro: '添加需要由 Agent 管理的 Cloudflare 账号。',
+        add: '添加账号',
+        addToken: '添加 API 令牌',
+        account: 'Cloudflare 账号',
+        pendingAccount: '待授权的 Cloudflare 账号',
         displayName: '连接名称',
-        authMethod: '授权方式',
+        tokenName: '令牌名称',
         oauth: '浏览器 OAuth',
         token: 'API 令牌',
-        scope: '附加 OAuth 权限',
-        scopeHelp: '多个权限用空格分隔。默认权限支持查询域名与编辑 DNS。',
-        scopeReference: 'Cloudflare 权限列表',
+        granted: '已授权权限',
         apiToken: 'Cloudflare API 令牌',
-        connect: '连接',
         save: '保存',
         cancel: '取消',
-        authorize: '授权',
+        authorize: '重新授权',
+        authorizing: '正在打开 Cloudflare 授权页…',
         browser: '打开 Cloudflare 授权页',
         check: '测试连接',
+        testing: '正在测试连接…',
+        testSucceeded: '连接测试通过。',
+        testFailed: '连接测试失败。请检查 Cloudflare 授权或 API 令牌后重试。',
+        authorizationPending: '请先在浏览器完成授权，然后再次测试连接。',
+        authorizationRequired: '请先授权此账号，再测试连接。',
+        credentialRejected: 'Cloudflare 拒绝了凭据。请重新授权或检查 API 令牌。',
+        permissionDenied: 'Cloudflare 拒绝访问。请检查此连接已获授权的权限。',
+        identityMismatch: 'Cloudflare 返回了另一个账号。请使用已绑定的账号登录。',
+        authorizationStartFailed: '无法启动 Cloudflare 授权，请重试。',
+        authorizationFailed: 'Cloudflare 授权失败，请重新授权。',
         rename: '改名',
         remove: '断开连接',
         confirmRemove: '从 DSH 移除此连接及其保存的凭据？',
@@ -92,6 +116,7 @@ window.__ModuleLoader__.load({
       primary: { ...control, cursor: 'pointer', background: 'var(--dsw-alias-label-primary)', color: 'var(--dsw-alias-bg-base)' },
       link: { color: 'var(--dsw-alias-label-primary)', textDecoration: 'underline' },
       danger: { color: 'var(--dsw-alias-state-error-primary)' },
+      success: { color: 'var(--dsw-alias-state-success-primary)' },
     };
 
     async function request(path, payload) {
@@ -122,23 +147,7 @@ window.__ModuleLoader__.load({
       return h('label', { style: styles.field }, text, input);
     }
 
-    function authorizationScopes(copy, value, setValue, disabled) {
-      return h('div', { style: styles.field },
-        field(copy.scope, h('input', {
-          value,
-          maxLength: 2000,
-          onChange: event => setValue(event.target.value),
-          spellCheck: false,
-          style: control,
-          disabled,
-        })),
-        h('p', { style: styles.meta }, copy.scopeHelp, ' ',
-          h('a', { href: SCOPE_REFERENCE, target: '_blank', rel: 'noopener noreferrer', style: styles.link }, copy.scopeReference)));
-    }
-
-    function NewConnection({ copy, disabled, add, close }) {
-      const [kind, setKind] = useState('oauth');
-      const [scope, setScope] = useState(DNS_SCOPE);
+    function NewToken({ copy, disabled, add, close }) {
       const token = useRef(null);
 
       return h('form', {
@@ -146,33 +155,44 @@ window.__ModuleLoader__.load({
         onSubmit(event) {
           event.preventDefault();
           const label = new FormData(event.currentTarget).get('label').trim();
-          if (!label) return;
           const apiToken = token.current?.value.trim();
-          if (kind === 'token' && !apiToken) return;
-          if (token.current) token.current.value = '';
-          add(kind === 'token' ? { label, apiToken } : { label }, scope);
+          if (!label || !apiToken) return;
+          token.current.value = '';
+          add({ label, apiToken });
         },
       },
-      field(copy.displayName, h('input', { name: 'label', required: true, maxLength: 80, style: control, disabled, autoFocus: true })),
-      field(copy.authMethod, h('select', { value: kind, onChange: event => setKind(event.target.value), style: control, disabled },
-        h('option', { value: 'oauth' }, copy.oauth), h('option', { value: 'token' }, copy.token))),
-      kind === 'oauth'
-        ? authorizationScopes(copy, scope, setScope, disabled)
-        : field(copy.apiToken, h('input', {
-          ref: token, type: 'password', required: true, autoComplete: 'off', spellCheck: false, maxLength: 1024, style: control, disabled,
-        })),
+      field(copy.tokenName, h('input', { name: 'label', required: true, maxLength: 80, style: control, disabled, autoFocus: true })),
+      field(copy.apiToken, h('input', {
+        ref: token, type: 'password', required: true, autoComplete: 'off', spellCheck: false, maxLength: 1024, style: control, disabled,
+      })),
       h('div', { style: styles.row },
-        connectionButton(copy.connect, undefined, disabled, { type: 'submit', primary: true }),
+        connectionButton(copy.save, undefined, disabled, { type: 'submit', primary: true }),
         connectionButton(copy.cancel, close, disabled)));
     }
 
     function Connection({ copy, connection, disabled, authorizeUrl, act, authorize }) {
-      const { id, label, kind, status, identity } = connection;
+      const { id, kind, status, identity, grantedScopes } = connection;
       const [action, setAction] = useState('');
-      const [scope, setScope] = useState(DNS_SCOPE);
+      const [testResult, setTestResult] = useState('');
       const oauth = kind === 'oauth';
-      const identityLabel = [identity?.name, identity?.email].filter(Boolean).join(' · ') || identity?.id;
+      const label = connection.label || (status === 'pending' ? copy.pendingAccount : copy.account);
+      const identityLabel = [identity?.name, identity?.email]
+        .filter(value => value && value !== label).join(' · ') || (!identity?.name && !identity?.email ? identity?.id : '');
       const clear = () => setAction('');
+      const testVisible = testResult && (testResult !== 'authorizationPending' || status === 'pending');
+
+      async function check() {
+        setTestResult('testing');
+        const passed = await act('/test', { id }, failure => {
+          setTestResult(connectionErrors.has(failure.message) ? failure.message : 'testFailed');
+        });
+        if (passed) setTestResult('testSucceeded');
+      }
+
+      function authorizeConnection() {
+        setTestResult('');
+        authorize(id);
+      }
 
       return h('article', { style: styles.card, 'aria-label': label },
         h('div', { style: styles.row }, h('strong', null, label), h('span', { style: styles.meta }, id)),
@@ -180,17 +200,27 @@ window.__ModuleLoader__.load({
           [oauth ? copy.oauth : copy.token, copy[status] ?? copy.unknown, identityLabel].filter(Boolean).join(' · ')),
         status === 'pending' && (authorizeUrl
           ? h('a', { href: authorizeUrl, target: '_blank', rel: 'noopener noreferrer', style: styles.link }, copy.browser)
-          : h('div', { style: styles.row }, connectionButton(copy.browser, () => authorize(id, scope), disabled))),
+          : h('div', { style: styles.row }, connectionButton(copy.browser, authorizeConnection, disabled))),
+        status === 'error' && !testVisible &&
+          h('p', { role: 'alert', style: styles.danger },
+            copy[connectionErrors.has(connection.error)
+              ? connection.error : oauth ? 'authorizationFailed' : 'testFailed']),
+        oauth && grantedScopes?.length > 0 && h('details', { style: styles.meta },
+          h('summary', null, copy.granted, ' (', grantedScopes.length, ')'),
+          h('p', null, grantedScopes.join(', '))),
+        testVisible && h('p', {
+          role: 'status',
+          style: {
+            ...styles.meta,
+            ...(testResult === 'testSucceeded' ? styles.success : {}),
+            ...(connectionErrors.has(testResult) && testResult !== 'authorizationPending' ? styles.danger : {}),
+          },
+        }, copy[testResult]),
         action === '' && h('div', { style: styles.row },
-          ...(oauth && status !== 'pending' ? [connectionButton(copy.authorize, () => setAction('authorize'), disabled)] : []),
-          connectionButton(copy.check, () => act('/test', { id }), disabled || status === 'pending'),
-          connectionButton(copy.rename, () => setAction('rename'), disabled),
+          oauth && status !== 'pending' && connectionButton(copy.authorize, authorizeConnection, disabled),
+          connectionButton(copy.check, check, disabled),
+          !oauth && connectionButton(copy.rename, () => setAction('rename'), disabled),
           connectionButton(copy.remove, () => setAction('remove'), disabled, { danger: true })),
-        action === 'authorize' && h('div', { style: styles.field },
-          authorizationScopes(copy, scope, setScope, disabled),
-          h('div', { style: styles.row },
-            connectionButton(copy.authorize, async () => { if (await authorize(id, scope)) clear(); }, disabled, { primary: true }),
-            connectionButton(copy.cancel, clear, disabled))),
         action === 'rename' && h('form', {
           style: styles.field,
           async onSubmit(event) {
@@ -215,7 +245,8 @@ window.__ModuleLoader__.load({
       const copy = activeLocale.toLowerCase().startsWith('zh') ? messages.zh : messages.en;
       const [connections, setConnections] = useState(null);
       const [error, setError] = useState('');
-      const [adding, setAdding] = useState(false);
+      const [addingToken, setAddingToken] = useState(false);
+      const [startingOAuth, setStartingOAuth] = useState(false);
       const [busy, setBusy] = useState(false);
       const [links, setLinks] = useState({});
       const pending = connections?.some(connection => connection.status === 'pending');
@@ -247,7 +278,7 @@ window.__ModuleLoader__.load({
         };
       }, [pending, busy]);
 
-      async function perform(action) {
+      async function perform(action, onFailure) {
         refreshId.current++;
         setBusy(true);
         setError('');
@@ -256,31 +287,41 @@ window.__ModuleLoader__.load({
           await refresh();
           return true;
         } catch (failure) {
-          setError(failure.message);
+          if (onFailure) onFailure(failure);
+          else setError(failure.message);
           return false;
         } finally {
           setBusy(false);
         }
       }
 
-      async function launch(id, scope) {
-        const { authorizeUrl } = await request('/authorize', { id, scope });
-        setLinks(current => ({ ...current, [id]: authorizeUrl }));
-        window.open(authorizeUrl, '_blank', 'noopener,noreferrer');
+      function launch(id) {
+        // Desktop forwards external HTTPS windows to the system browser. On the Web,
+        // reserve the new tab during the click so the authorization request can finish asynchronously.
+        const desktop = Boolean(window.dshDesktop);
+        const popup = desktop ? null : window.open('about:blank', '_blank');
+        if (popup) popup.opener = null;
+        setStartingOAuth(true);
+        return perform(async () => {
+          const { authorizeUrl, connection } = await request('/authorize', id ? { id } : {});
+          const url = new URL(authorizeUrl);
+          if (url.origin !== 'https://mcp.cloudflare.com' || url.pathname !== '/authorize' || url.username || url.password) {
+            throw new Error('authorizationStartFailed');
+          }
+          setLinks(current => ({ ...current, [connection.id]: url.href }));
+          if (desktop) window.open(url.href, '_blank', 'noopener,noreferrer');
+          else if (popup && !popup.closed) popup.location.replace(url.href);
+        }, failure => {
+          popup?.close();
+          setError(failure.message === 'localOnly' ? 'localOnly' : 'authorizationStartFailed');
+        }).finally(() => setStartingOAuth(false));
       }
 
-      function add(payload, scope) {
-        perform(async () => {
-          const { connection } = await request('/add', payload);
-          setAdding(false);
-          if (connection.kind === 'oauth') await launch(connection.id, scope);
-        });
-      }
-
-      return h('section', { style: styles.section, 'aria-busy': busy },
+      return h('section', { style: styles.section },
         h('h2', { style: styles.title }, copy.title),
         h('p', { style: styles.meta }, copy.intro),
         error && h('p', { role: 'alert', style: styles.danger }, copy[error] ?? copy.unavailable),
+        startingOAuth && h('p', { role: 'status', style: styles.meta }, copy.authorizing),
         connections === null && !error && h('p', { role: 'status', style: styles.meta }, copy.loading),
         connections?.length === 0 && h('p', { style: styles.meta }, copy.empty),
         ...(connections ?? []).map(connection => h(Connection, {
@@ -289,12 +330,21 @@ window.__ModuleLoader__.load({
           connection,
           disabled: busy,
           authorizeUrl: links[connection.id],
-          act: (path, payload) => perform(() => request(path, payload)),
-          authorize: (id, scope) => perform(() => launch(id, scope)),
+          act: (path, payload, onFailure) => perform(() => request(path, payload), onFailure),
+          authorize: launch,
         })),
-        adding
-          ? h(NewConnection, { copy, disabled: busy, add, close: () => setAdding(false) })
-          : h('div', { style: styles.row }, connectionButton(copy.add, () => setAdding(true), busy, { primary: true })));
+        h('div', { style: styles.row },
+          connectionButton(copy.add, () => launch(), busy, { primary: true }),
+          !addingToken && connectionButton(copy.addToken, () => setAddingToken(true), busy)),
+        addingToken && h(NewToken, {
+          copy,
+          disabled: busy,
+          add: payload => perform(async () => {
+            await request('/add', payload);
+            setAddingToken(false);
+          }),
+          close: () => setAddingToken(false),
+        }));
     }
 
     return {

@@ -1,6 +1,6 @@
 {
   "name": "dsh-cloudflare",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "description": "Connect multiple Cloudflare accounts to DeepSeek Harness and manage DNS, domains, Workers, R2, and more through Cloudflare's official MCP.",
   "license": "MIT",

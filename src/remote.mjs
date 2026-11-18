@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import plugin from '../package.json' with { type: 'json' };
 
 const MCP_ENDPOINT = new URL('https://mcp.cloudflare.com/mcp');
 const RESOURCE_METADATA = new URL('/.well-known/oauth-protected-resource/mcp', MCP_ENDPOINT);
@@ -12,7 +13,13 @@ const CALLBACK_PATH = '/cloudflare/oauth/callback';
 const BASE_SCOPES = 'user:read account:read offline_access';
 const RENEWAL_WINDOW_MS = 30_000;
 
-class RemoteError extends Error {}
+export class RemoteError extends Error {
+  constructor(message, code = 'testFailed') {
+    super(message);
+    this.name = 'RemoteError';
+    this.code = code;
+  }
+}
 
 function oauthProvider({ credentials, redirectUrl, state, redirect }) {
   let codeVerifier;
@@ -51,8 +58,8 @@ function oauthProvider({ credentials, redirectUrl, state, redirect }) {
   };
 }
 
-function scopeList(value) {
-  if (typeof value !== 'string' || value.length > 8_000) return [];
+export function scopeList(value) {
+  if (typeof value !== 'string' || value.length > 32_768) return [];
   return value.split(/\s+/).filter(scope => /^[a-z][a-z0-9_.:-]{0,100}$/i.test(scope));
 }
 
@@ -98,6 +105,7 @@ export function createRemote({
   validateIdentity = async () => true,
   onAuthorized = async () => {},
   fetchImpl = globalThis.fetch,
+  connectionTimeoutMs = 15_000,
   requestTimeoutMs = 120_000,
   oauthTimeoutMs = 300_000,
 }) {
@@ -127,16 +135,14 @@ export function createRemote({
 
       if (response.status === 401) {
         await response.body?.cancel();
-        const error = new RemoteError('Cloudflare rejected the credential. Reconnect it in Cloudflare settings if it has expired.');
-        error.status = 401;
-        throw error;
+        throw new RemoteError('Cloudflare rejected the credential. Reconnect it in Cloudflare settings if it has expired.', 'credentialRejected');
       }
       if (response.status === 403) {
         const challenge = response.headers.get('www-authenticate') ?? '';
         const scopes = scopeList(/\bscope="([^"]*)"/i.exec(challenge)?.[1]);
         await response.body?.cancel();
         const detail = scopes.length ? ` Required scopes: ${scopes.join(' ')}.` : '';
-        throw new RemoteError(`Cloudflare denied access. Check the permissions for this connection.${detail}`);
+        throw new RemoteError(`Cloudflare denied access. Check the permissions for this connection.${detail}`, 'permissionDenied');
       }
       return response;
     };
@@ -144,7 +150,7 @@ export function createRemote({
 
   async function checkIdentity(identity) {
     if (await validateIdentity(identity) === false) {
-      throw new RemoteError('The authorized Cloudflare identity does not match this connection. Add it as a separate connection.');
+      throw new RemoteError('The authorized Cloudflare identity does not match this connection. Add it as a separate connection.', 'identityMismatch');
     }
   }
 
@@ -157,9 +163,13 @@ export function createRemote({
 
   async function openSession(credentials, signal) {
     const bearer = credentials.apiToken ?? credentials.tokens?.access_token;
-    if (!bearer) throw new RemoteError('Authorize this connection in Cloudflare settings first.');
-    const options = { timeout: requestTimeoutMs, signal };
-    const client = new Client({ name: 'dsh-cloudflare', version: '2.0.0' });
+    if (!bearer) throw new RemoteError('Authorize this connection in Cloudflare settings first.', 'authorizationRequired');
+    const handshakeTimeout = AbortSignal.timeout(connectionTimeoutMs);
+    const options = {
+      timeout: connectionTimeoutMs,
+      signal: signal ? AbortSignal.any([signal, handshakeTimeout]) : handshakeTimeout,
+    };
+    const client = new Client({ name: plugin.name, version: plugin.version });
     const transport = new StreamableHTTPClientTransport(MCP_ENDPOINT, {
       requestInit: { headers: { Authorization: `Bearer ${bearer}` } },
       fetch: cloudflareFetch({ signal, mcp: true }),
@@ -177,7 +187,7 @@ export function createRemote({
 
   async function refresh(credentials) {
     if (!credentials.tokens?.refresh_token || !credentials.redirectUrl) {
-      throw new RemoteError('The Cloudflare authorization expired. Reconnect it in Cloudflare settings.');
+      throw new RemoteError('The Cloudflare authorization expired. Reconnect it in Cloudflare settings.', 'authorizationRequired');
     }
     const updated = { ...credentials };
     const provider = oauthProvider({ credentials: updated, redirectUrl: updated.redirectUrl, redirect: () => {} });
@@ -186,13 +196,13 @@ export function createRemote({
       status = await auth(provider, {
         serverUrl: MCP_ENDPOINT,
         resourceMetadataUrl: RESOURCE_METADATA,
-        fetchFn: cloudflareFetch({ timeout: 20_000 }),
+        fetchFn: cloudflareFetch({ timeout: connectionTimeoutMs, signal: AbortSignal.timeout(connectionTimeoutMs) }),
       });
     } catch {
-      throw new RemoteError('Cloudflare rejected the refresh. Reconnect it in Cloudflare settings.');
+      throw new RemoteError('Cloudflare rejected the refresh. Reconnect it in Cloudflare settings.', 'authorizationRequired');
     }
     if (status !== 'AUTHORIZED') {
-      throw new RemoteError('The Cloudflare authorization expired. Reconnect it in Cloudflare settings.');
+      throw new RemoteError('The Cloudflare authorization expired. Reconnect it in Cloudflare settings.', 'authorizationRequired');
     }
     return updated;
   }
@@ -227,7 +237,7 @@ export function createRemote({
         await old?.client.close().catch(() => {});
         return connected;
       } catch (error) {
-        if (error.status === 401 && !current.apiToken && current.tokens?.refresh_token) refreshRequired = true;
+        if (error?.code === 'credentialRejected' && !current.apiToken && current.tokens?.refresh_token) refreshRequired = true;
         throw error;
       } finally {
         if (connected && session !== connected) await connected.client.close().catch(() => {});
@@ -245,7 +255,7 @@ export function createRemote({
     candidate.server?.close();
   }
 
-  async function startOAuth({ scope } = {}) {
+  async function startOAuth() {
     if (lifetime.signal.aborted) throw new RemoteError('This Cloudflare connection has been closed.');
     if (pending?.authorizeUrl) return { authorizeUrl: pending.authorizeUrl };
     if (pending) throw new RemoteError('Cloudflare authorization is already starting.');
@@ -256,12 +266,10 @@ export function createRemote({
     const staged = {};
     let provider;
     let redirectUrl;
-    let scopeRequest;
-
     const authorize = (options = {}) => auth(provider, {
       serverUrl: MCP_ENDPOINT,
       resourceMetadataUrl: RESOURCE_METADATA,
-      scope: scopeRequest,
+      scope: BASE_SCOPES,
       fetchFn: cloudflareFetch({ signal: candidate.controller.signal, timeout: 20_000 }),
       ...options,
     });
@@ -330,8 +338,6 @@ export function createRemote({
       await listening;
       redirectUrl = `http://${LOOPBACK_HOST}:${candidate.server.address().port}${CALLBACK_PATH}`;
       staged.redirectUrl = redirectUrl;
-      const prior = await readCredentials();
-      scopeRequest = [...new Set([...BASE_SCOPES.split(' '), ...scopeList(prior?.tokens?.scope), ...scopeList(scope)])].join(' ');
       provider = oauthProvider({
         credentials: staged,
         redirectUrl,
@@ -351,6 +357,7 @@ export function createRemote({
     } catch (error) {
       const message = error instanceof RemoteError ? error.message : 'Could not start Cloudflare authorization.';
       endOAuth(candidate, message);
+      if (error instanceof RemoteError) throw error;
       throw new RemoteError(message);
     }
   }
@@ -363,9 +370,9 @@ export function createRemote({
       const connected = await getSession();
       if (verify && previous === connected) {
         try {
-          connected.identity = await whoami(connected.client, { timeout: requestTimeoutMs });
+          connected.identity = await whoami(connected.client, { timeout: connectionTimeoutMs });
         } catch (error) {
-          if (error?.status === 401 && session === connected && !connected.credentials.apiToken) {
+          if (error?.code === 'credentialRejected' && session === connected && !connected.credentials.apiToken) {
             refreshRequired = true;
           }
           if (error instanceof RemoteError) throw error;
@@ -382,7 +389,7 @@ export function createRemote({
         return await connected.client.callTool({ name, arguments: args }, undefined, { timeout: requestTimeoutMs, signal });
       } catch (error) {
         // A failed action is never replayed. The next explicit call can renew the token.
-        if (error?.status === 401 && session === connected && !connected.credentials.apiToken) {
+        if (error?.code === 'credentialRejected' && session === connected && !connected.credentials.apiToken) {
           refreshRequired = true;
         }
         if (error instanceof RemoteError) throw error;

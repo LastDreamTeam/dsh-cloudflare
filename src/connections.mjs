@@ -2,7 +2,18 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { createRemote } from './remote.mjs';
+import { createRemote, RemoteError, scopeList } from './remote.mjs';
+
+export class ConnectionTestError extends Error {
+  constructor(code, connection) {
+    super(code);
+    this.code = code;
+    this.connection = connection;
+  }
+}
+
+const TEST_ERRORS = new Set(['authorizationRequired', 'credentialRejected', 'permissionDenied', 'identityMismatch']);
+const INTERNAL_LABEL_PREFIX = '\u001f';
 
 export function createConnections(profileDir, { makeRemote = createRemote } = {}) {
   const directory = join(profileDir, 'dsh-cloudflare');
@@ -22,9 +33,18 @@ export function createConnections(profileDir, { makeRemote = createRemote } = {}
       identity_id TEXT
     ) STRICT;
   `);
+  // Retire legacy OAuth nicknames so API-token users can reuse them.
+  database.prepare(`
+    UPDATE connections SET label = ? || id WHERE kind = 'oauth' AND label <> ? || id
+  `).run(INTERNAL_LABEL_PREFIX, INTERNAL_LABEL_PREFIX);
   const statements = {
-    all: database.prepare('SELECT id, label, kind, identity FROM connections ORDER BY rowid'),
-    get: database.prepare('SELECT * FROM connections WHERE id = ?'),
+    all: database.prepare(`
+      SELECT id, label, kind, identity, json_extract(credentials, '$.tokens.scope') AS scope
+      FROM connections ORDER BY rowid
+    `),
+    get: database.prepare(`
+      SELECT *, json_extract(credentials, '$.tokens.scope') AS scope FROM connections WHERE id = ?
+    `),
     label: database.prepare('SELECT id FROM connections WHERE label = ?'),
     add: database.prepare('INSERT INTO connections (id, label, kind, credentials) VALUES (?, ?, ?, ?)'),
     rename: database.prepare('UPDATE connections SET label = ? WHERE id = ?'),
@@ -87,6 +107,7 @@ export function createConnections(profileDir, { makeRemote = createRemote } = {}
       },
       onAuthorized() {
         entry.status = 'connected';
+        entry.error = undefined;
       },
     });
     remotes.set(id, entry);
@@ -96,13 +117,14 @@ export function createConnections(profileDir, { makeRemote = createRemote } = {}
   function publicConnection(row) {
     const entry = remotes.get(row.id);
     const authorization = entry?.remote.oauthStatus();
-    const status = authorization?.pending ? 'pending' : entry?.status ?? 'unknown';
-    const connection = { id: row.id, label: row.label, kind: row.kind, status };
-    if (authorization?.error) {
-      connection.status = 'error';
-      connection.error = authorization.error;
-    }
-    if (row.identity) connection.identity = JSON.parse(row.identity);
+    const identity = row.identity ? JSON.parse(row.identity) : undefined;
+    const label = row.kind === 'oauth' ? identity?.name || identity?.email || identity?.id || null : row.label;
+    const error = entry?.error ?? (authorization?.error ? 'authorizationFailed' : undefined);
+    const status = authorization?.pending ? 'pending' : error ? 'error' : entry?.status ?? 'unknown';
+    const connection = { id: row.id, label, kind: row.kind, status };
+    if (identity) connection.identity = identity;
+    if (error && status === 'error') connection.error = error;
+    if (row.kind === 'oauth' && typeof row.scope === 'string') connection.grantedScopes = [...new Set(scopeList(row.scope))];
     return connection;
   }
 
@@ -131,11 +153,20 @@ export function createConnections(profileDir, { makeRemote = createRemote } = {}
       const identity = await entry.remote.connect(options);
       saveIdentity(id, identity);
       entry.status = 'connected';
+      entry.error = undefined;
       return identity;
     } catch (error) {
       entry.status = 'error';
       throw error;
     }
+  }
+
+  async function removeConnection({ id }) {
+    get(id);
+    statements.delete.run(id);
+    const entry = remotes.get(id);
+    remotes.delete(id);
+    await entry?.remote.close();
   }
 
   return {
@@ -145,38 +176,52 @@ export function createConnections(profileDir, { makeRemote = createRemote } = {}
     addConnection({ label, apiToken }) {
       const id = randomUUID();
       const name = normalizeLabel(label, id);
-      if (apiToken !== undefined && (typeof apiToken !== 'string' || !/^[A-Za-z0-9_.-]{1,1024}$/.test(apiToken.trim()))) {
+      if (typeof apiToken !== 'string' || !/^[A-Za-z0-9_.-]{1,1024}$/.test(apiToken.trim())) {
         throw new Error('Enter a valid Cloudflare API token.');
       }
-      const credentials = apiToken === undefined ? null : JSON.stringify({ apiToken: apiToken.trim() });
-      statements.add.run(id, name, credentials ? 'token' : 'oauth', credentials);
+      statements.add.run(id, name, 'token', JSON.stringify({ apiToken: apiToken.trim() }));
       return publicConnection(get(id));
     },
     renameConnection({ id, label }) {
-      get(id);
+      if (get(id).kind !== 'token') throw new Error('The display name of an OAuth account comes from Cloudflare.');
       statements.rename.run(normalizeLabel(label, id), id);
       return publicConnection(get(id));
     },
-    async startOAuth({ id, scope }) {
-      if (get(id).kind !== 'oauth') throw new Error('This connection uses an API token.');
-      if (scope !== undefined && (typeof scope !== 'string' || scope.length > 2048 || !/^[a-zA-Z0-9:._ -]*$/.test(scope))) {
-        throw new Error('Enter OAuth permission scopes separated by spaces.');
+    async startOAuth({ id } = {}) {
+      const isNew = id === undefined;
+      if (isNew) {
+        id = randomUUID();
+        statements.add.run(id, INTERNAL_LABEL_PREFIX + id, 'oauth', null);
       }
-      return runtime(id).remote.startOAuth({ scope });
+      if (get(id).kind !== 'oauth') throw new Error('This connection uses an API token.');
+      try {
+        const entry = runtime(id);
+        entry.error = undefined;
+        const { authorizeUrl } = await entry.remote.startOAuth();
+        return { authorizeUrl, connection: publicConnection(get(id)) };
+      } catch (error) {
+        if (isNew) await removeConnection({ id });
+        throw error;
+      }
     },
     async testConnection({ id }) {
-      get(id);
+      const row = get(id);
       const entry = runtime(id);
-      await verifyConnection(id, entry, { verify: true });
+      if (entry.remote.oauthStatus().pending) {
+        throw new ConnectionTestError('authorizationPending', publicConnection(row));
+      }
+      if (row.kind === 'oauth' && !row.credentials) {
+        throw new ConnectionTestError('authorizationRequired', publicConnection(row));
+      }
+      try {
+        await verifyConnection(id, entry, { verify: true });
+      } catch (error) {
+        entry.error = error instanceof RemoteError && TEST_ERRORS.has(error.code) ? error.code : 'testFailed';
+        throw new ConnectionTestError(entry.error, publicConnection(get(id)));
+      }
       return publicConnection(get(id));
     },
-    async removeConnection({ id }) {
-      get(id);
-      statements.delete.run(id);
-      const entry = remotes.get(id);
-      remotes.delete(id);
-      await entry?.remote.close();
-    },
+    removeConnection,
     async callTool(name, { connection_id, ...args }, options) {
       const id = resolveId(connection_id);
       const entry = runtime(id);

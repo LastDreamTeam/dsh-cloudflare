@@ -23,19 +23,25 @@ dsh plugin --profile web add github:LastDreamTeam/dsh-cloudflare
 
 Add `#<commit-sha>` to the CLI package spec to pin a commit. The plugin is distributed from GitHub. DSH 0.2.2-rc.1 is the target host version. Running DSH outside Desktop requires Node.js 24.9 or later.
 
+### Update the plugin
+
+To update a GitHub installation, remove the package from the DSH plugin list and install it again using the same link and profile. Saved Cloudflare connections stay in the profile.
+
 ### Upgrade from 1.x
 
 Remove `dsh-cloudflare-api-mcp` from the target profile, install `dsh-cloudflare`, then authorize again in its settings. Version 2.0.0 uses the new package name and profile-local credential storage. The old `mcp-remote` credentials are left in their original directory and must be removed separately if desired.
 
 ## Connect Cloudflare accounts
 
-Open **Settings → Cloudflare**, add a connection, and give it a name you can identify in a conversation, such as `production` or `staging`. Choose browser OAuth and grant the permissions the connection needs. Open the browser on the same machine as the DSH process so that Cloudflare can return to the local sign-in callback. Use a separate browser profile or switch Cloudflare users when adding another identity.
+Open **Settings → Cloudflare** and select **Add account** to start browser authorization. The account appears with its verified Cloudflare name or email after sign-in. Use a separate browser profile or switch Cloudflare users when adding another identity. The browser must run on the same machine as DSH to complete the local callback.
 
-The OAuth form starts with `zone.read` and `dns.write` for zone lookup and DNS edits. Edit those scopes to match your use, then review the Cloudflare consent page. **Minimal** grants identity and account discovery, and **Advanced** shows the individual scopes. Sign in again with the required scopes if a later operation needs additional permission. To connect a different Cloudflare identity, create a new connection. [Cloudflare MCP consent](https://github.com/cloudflare/mcp/blob/main/AGENTS.md#authentication)
+Choose permissions on Cloudflare’s own consent page. Its templates cover minimal identity and account discovery, read-only access, and full access. Expand **Advanced** to grant specific permissions such as `zone.read` and `dns.write` for DNS edits. After sign-in, DSH displays the OAuth scopes reported by Cloudflare. Reauthorize the connection if you need additional permissions later. [Cloudflare MCP consent](https://github.com/cloudflare/mcp/blob/main/AGENTS.md#authentication)
 
-You can also add a scoped Cloudflare API token through the settings panel. Choose only the accounts, zones, and permissions needed by that connection. Account-owned tokens need **Account Resources → Read** for the upstream MCP to discover the account automatically. The upstream MCP currently does not support API tokens with client IP address filtering. [Cloudflare MCP token setup](https://github.com/cloudflare/mcp#option-2-api-token)
+While DSH is waiting for authorization, complete sign-in in the browser. If the browser did not open, select **Open Cloudflare authorization** in the settings panel. Use **Test connection** to check the current status. DSH shows the verified identity on success and guidance if authorization is pending or the connection fails.
 
-Use the settings panel to rename, test, or remove each connection independently. Credentials stay in the current DSH profile and are kept out of Agent tool arguments and responses. The credential file uses owner-only permissions on POSIX and inherits the profile directory’s access controls on Windows. Removing a connection removes its local credential. Manage upstream OAuth grants or API tokens from Cloudflare.
+Choose **Add API token** to add an access token with a display name such as `staging`. You can rename token connections in the settings panel. Scope the token to the intended accounts, zones, and permissions. Account-owned tokens need **Account Resources → Read** for account discovery. The Cloudflare MCP server currently requires client IP address filtering to be disabled for API tokens. [Cloudflare MCP token setup](https://github.com/cloudflare/mcp#option-2-api-token)
+
+Credentials stay in the current DSH profile and are kept out of Agent tool arguments and responses. The credential file uses owner-only permissions on POSIX and inherits the profile directory’s access controls on Windows. Removing a connection removes its local credential. Manage upstream OAuth grants or API tokens from Cloudflare.
 
 ## Use with an Agent
 
@@ -51,7 +57,7 @@ When more than one connection exists, supply `connection_id` when calling a tool
 
 Name the connection, zone, record, and intended change in your prompt.
 
-> Use the `staging` Cloudflare connection. In the intended Cloudflare account, find the `example.com` zone and show the current A record for `app.example.com`. Update that specific record to `192.0.2.10`, keeping its TTL and proxy setting, and read it back to verify the change.
+> Use the Cloudflare connection for `staging@example.com`. In the intended Cloudflare account, find the `example.com` zone and show the current A record for `app.example.com`. Update that specific record to `192.0.2.10`, keeping its TTL and proxy setting, and read it back to verify the change.
 
 For DNS management, grant **Zone Read** to discover the zone and **DNS Write** to create, update, or delete its records. Add **Zone Write** to create or manage the zone itself. Workers, storage, cache, SSL/TLS, and other products use their own scopes. Use `search` to check the permission for the selected endpoint. [API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) · [DNS API](https://developers.cloudflare.com/api/resources/dns/subresources/records/)
 

@@ -1,3 +1,5 @@
+import { ConnectionTestError } from './connections.mjs';
+
 const BASE = '/api/lastdreamteam/cloudflare';
 const MAX_BODY_SIZE = 8192;
 const LOCAL_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -52,12 +54,14 @@ async function readBody(req) {
   }
 }
 
-function view({ id, label, kind, status, identity }) {
+function view({ id, label, kind, status, identity, error, grantedScopes }) {
   const connection = { id, label, kind, status };
   if (identity) {
     const { id: userId, name, email } = identity;
     connection.identity = { id: userId, name, email };
   }
+  if (error) connection.error = error;
+  if (grantedScopes) connection.grantedScopes = grantedScopes;
   return connection;
 }
 
@@ -74,11 +78,12 @@ export function registerWeb(ctx, service) {
   const routes = [
     ['/connections', 'GET', async () => ({ connections: (await service.listConnections()).map(view) })],
     ['/add', 'POST', async ({ label, apiToken }) => ({
-      connection: view(await service.addConnection(apiToken === undefined ? { label } : { label, apiToken })),
+      connection: view(await service.addConnection({ label, apiToken })),
     })],
-    ['/authorize', 'POST', async ({ id, scope }) => ({
-      authorizeUrl: authorizeUrl((await service.startOAuth({ id, scope })).authorizeUrl),
-    })],
+    ['/authorize', 'POST', async ({ id }) => {
+      const result = await service.startOAuth({ id });
+      return { authorizeUrl: authorizeUrl(result.authorizeUrl), connection: view(result.connection) };
+    }],
     ['/test', 'POST', async ({ id }) => ({ connection: view(await service.testConnection({ id })) })],
     ['/rename', 'POST', async ({ id, label }) => ({ connection: view(await service.renameConnection({ id, label })) })],
     ['/remove', 'POST', async ({ id }) => { await service.removeConnection({ id }); return {}; }],
@@ -105,7 +110,11 @@ export function registerWeb(ctx, service) {
         const input = method === 'POST' ? await readBody(req) : {};
         if (input === undefined) return send(res, 400, { error: 'invalidRequest' });
         return send(res, 200, await action(input));
-      } catch {
+      } catch (error) {
+        if (error instanceof ConnectionTestError) {
+          const needsConsent = error.code === 'authorizationPending' || error.code === 'authorizationRequired';
+          return send(res, needsConsent ? 409 : 502, { error: error.code, connection: view(error.connection) });
+        }
         // SDK failures can contain request details. Keep them out of browser responses.
         return send(res, 400, { error: 'operationFailed' });
       }

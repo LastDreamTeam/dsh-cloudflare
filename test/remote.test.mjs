@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { createRemote } from '../src/remote.mjs';
+import { createRemote, RemoteError } from '../src/remote.mjs';
 
 const origin = 'https://mcp.cloudflare.com';
 
@@ -37,7 +37,7 @@ function cloudflareFixture() {
       const params = new URLSearchParams(options.body);
       exchanges.push(params);
       const subject = params.get('code') ?? params.get('refresh_token').slice('refresh-'.length);
-      return Response.json({ access_token: subject, refresh_token: `refresh-${subject}`, token_type: 'Bearer', expires_in: 3600 });
+      return Response.json({ access_token: subject, refresh_token: `refresh-${subject}`, token_type: 'Bearer', expires_in: 3600, scope: 'user:read account:read offline_access dns.write' });
     }
 
     assert.equal(url.pathname, '/mcp');
@@ -45,6 +45,7 @@ function cloudflareFixture() {
     const subject = new Headers(options.headers).get('authorization').slice('Bearer '.length);
     const { method, id, params } = JSON.parse(options.body);
     if (method === 'initialize') {
+      if (subject === 'invalid') return new Response(null, { status: 401 });
       return rpc(id, { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'mock-cf', version: '1' } });
     }
     if (method.startsWith('notifications/')) return new Response(null, { status: 202 });
@@ -89,10 +90,10 @@ test('OAuth stages new credentials until state, issuer and account identity are 
   t.after(() => remote.close());
   assert.equal((await remote.connect()).id, 'user:alpha');
 
-  const first = await remote.startOAuth({ scope: 'zone.read dns.write' });
+  const first = await remote.startOAuth();
   const auth = new URL(first.authorizeUrl);
   assert.equal(auth.origin, origin);
-  assert.equal(auth.searchParams.get('scope'), 'user:read account:read offline_access zone.read dns.write');
+  assert.equal(auth.searchParams.get('scope'), 'user:read account:read offline_access');
   const callback = callbackFor(first, 'beta');
   assert.equal(callback.hostname, '127.0.0.1');
   const badState = new URL(callback);
@@ -119,10 +120,13 @@ test('OAuth stages new credentials until state, issuer and account identity are 
   assert.deepEqual(notifications, commits);
   assert.deepEqual(remote.oauthStatus(), { pending: false });
   assert.equal(read.tokens.access_token, 'alpha');
+  assert.match(read.tokens.scope, /\bdns\.write\b/);
   assert.equal(read.apiToken, undefined);
   assert.equal(fixture.registration.length, 3);
   const verifier = fixture.exchanges[0].get('code_verifier');
   assert.equal(createHash('sha256').update(verifier).digest('base64url'), auth.searchParams.get('code_challenge'));
+  const reconnect = new URL((await remote.startOAuth()).authorizeUrl);
+  assert.equal(reconnect.searchParams.get('scope'), 'user:read account:read offline_access');
 });
 
 test('MCP sessions isolate credentials and never replay a rejected write', async t => {
@@ -137,12 +141,31 @@ test('MCP sessions isolate credentials and never replay a rejected write', async
   assert.equal((await first.connect({ verify: true })).id, 'user:alpha');
   assert.equal(fixture.calls.filter(call => call.name === 'whoami' && call.subject === 'alpha').length, 2);
   assert.equal((await second.callTool('execute', {})).content[0].text, 'Executed with beta');
-  await assert.rejects(first.callTool('execute', { denied: true }), /Required scopes: dns\.write/);
+  await assert.rejects(first.callTool('execute', { denied: true }), {
+    code: 'permissionDenied',
+    message: /Required scopes: dns\.write/,
+  });
   assert.deepEqual(fixture.calls.filter(call => call.args?.denied), [{ name: 'execute', args: { denied: true }, subject: 'alpha' }]);
   const abort = new AbortController();
   abort.abort();
   await assert.rejects(first.callTool('execute', { cancelled: true }, { signal: abort.signal }), /abort/i);
   assert.equal(fixture.calls.some(call => call.args?.cancelled), false);
+});
+
+test('connection checks report structured credential rejection and a bounded handshake', async t => {
+  const fixture = cloudflareFixture();
+  const invalid = createRemote({ readCredentials: async () => ({ apiToken: 'invalid' }), fetchImpl: fixture.fetchImpl });
+  const stalled = createRemote({
+    readCredentials: async () => ({ apiToken: 'alpha' }),
+    connectionTimeoutMs: 25,
+    fetchImpl: async (_url, options) => new Promise((resolve, reject) => {
+      if (options.signal.aborted) reject(options.signal.reason);
+      else options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    }),
+  });
+  t.after(() => Promise.all([invalid.close(), stalled.close()]));
+  await assert.rejects(invalid.connect({ verify: true }), { code: 'credentialRejected', name: 'RemoteError' });
+  await assert.rejects(stalled.connect({ verify: true }), error => error instanceof RemoteError && error.code === 'testFailed');
 });
 
 test('closing a connection aborts an in-flight request without replaying it', async t => {
