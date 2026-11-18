@@ -1,49 +1,62 @@
-# dsh-cloudflare-api-mcp
+# Cloudflare for DeepSeek Harness
 
-A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that connects agents to the official [Cloudflare API MCP](https://mcp.cloudflare.com/mcp) (DNS, Workers, R2, and more) through `mcp-remote` and browser OAuth.
+[简体中文](README.zh.md)
+
+`dsh-cloudflare` connects DeepSeek Harness (DSH) to the official Cloudflare API MCP server. Bind multiple Cloudflare identities in DSH settings, then let the Agent manage zones, DNS, Workers, R2, and other Cloudflare resources through the permissions granted to each connection. [Cloudflare API MCP](https://github.com/cloudflare/mcp)
 
 ## Install
 
-This package is distributed from GitHub (it is not published to npm).
+1. Open **Plugins → Add plugin** in DSH Desktop.
+2. Paste the repository URL into the package input.
 
-```bash
-# Web profile
-dsh plugin --profile web add github:LastDreamTeam/dsh-cloudflare-api-mcp
+   ```text
+   https://github.com/LastDreamTeam/dsh-cloudflare
+   ```
 
-# Desktop profile
-dsh plugin --profile desktop add github:LastDreamTeam/dsh-cloudflare-api-mcp
+3. Click **Install** and enable the plugin if needed. If DSH prompts you to restart, restart it before opening **Settings → Cloudflare**.
+
+Install into a standalone DSH web profile with the CLI.
+
+```sh
+dsh plugin --profile web add github:LastDreamTeam/dsh-cloudflare
 ```
 
-To pin a specific commit:
+Add `#<commit-sha>` to the CLI package spec to pin a commit. The plugin is distributed from GitHub. DSH 0.2.2-rc.1 is the target host version. Running DSH outside Desktop requires Node.js 24.9 or later.
 
-```bash
-dsh plugin --profile web add github:LastDreamTeam/dsh-cloudflare-api-mcp#COMMIT_SHA
-```
+### Upgrade from 1.x
 
-Restart the profile after installation.
+Remove `dsh-cloudflare-api-mcp` from the target profile, install `dsh-cloudflare`, then authorize again in its settings. Version 2.0.0 uses the new package name and profile-local credential storage. The old `mcp-remote` credentials are left in their original directory and must be removed separately if desired.
 
-## First-run authorization
+## Connect Cloudflare accounts
 
-The first time the MCP client starts, `mcp-remote` opens a browser window so you can sign in with your Cloudflare account and grant access. After that, tokens are stored under `~/.mcp-auth/cloudflare-api` in the user home directory (the same path on Windows). Re-authorization uses the same flow if the stored tokens expire.
+Open **Settings → Cloudflare**, add a connection, and give it a name you can identify in a conversation, such as `production` or `staging`. Choose browser OAuth and grant the permissions the connection needs. Open the browser on the same machine as the DSH process so that Cloudflare can return to the local sign-in callback. Use a separate browser profile or switch Cloudflare users when adding another identity.
 
-The official endpoint is `https://mcp.cloudflare.com/mcp` (HTTP-only transport). The plugin waits up to 10 minutes for the first-run sign-in.
+The OAuth form starts with `zone.read` and `dns.write` for zone lookup and DNS edits. Edit those scopes to match your use, then review the Cloudflare consent page. **Minimal** grants identity and account discovery, and **Advanced** shows the individual scopes. Sign in again with the required scopes if a later operation needs additional permission. To connect a different Cloudflare identity, create a new connection. [Cloudflare MCP consent](https://github.com/cloudflare/mcp/blob/main/AGENTS.md#authentication)
 
-## Requirements
+You can also add a scoped Cloudflare API token through the settings panel. Choose only the accounts, zones, and permissions needed by that connection. Account-owned tokens need **Account Resources → Read** for the upstream MCP to discover the account automatically. The upstream MCP currently does not support API tokens with client IP address filtering. [Cloudflare MCP token setup](https://github.com/cloudflare/mcp#option-2-api-token)
 
-- DeepSeek Harness with `@deepseek-ai/dsh-mcp-client` available in the target profile (ships with current DSH releases).
-- A Cloudflare account that can authorize the official API MCP.
-- The plugin launches `mcp-remote` with the same runtime that started DSH (`process.execPath`). No machine-specific Node or `mcp-remote` paths are required.
+Use the settings panel to rename, test, or remove each connection independently. Credentials stay in the current DSH profile and are kept out of Agent tool arguments and responses. The credential file uses owner-only permissions on POSIX and inherits the profile directory’s access controls on Windows. Removing a connection removes its local credential. Manage upstream OAuth grants or API tokens from Cloudflare.
 
-## Check the launcher
+## Use with an Agent
 
-After dependencies are installed:
+| Tool | Purpose |
+| --- | --- |
+| `mcp__cfapi__list_connections` | List the configured connections and their IDs. |
+| `mcp__cfapi__whoami` | Verify the credential’s Cloudflare identity. |
+| `mcp__cfapi__docs` | Search Cloudflare developer documentation. |
+| `mcp__cfapi__search` | Find operations, permission requirements, and request schemas in the Cloudflare API specification. |
+| `mcp__cfapi__execute` | Run the selected operations through Cloudflare’s Code Mode sandbox. |
 
-```bash
-node bin/launch.mjs --check
-```
+When more than one connection exists, supply `connection_id` when calling a tool against Cloudflare. A single connection can have access to more than one Cloudflare account. For an account-scoped operation, identify the intended Cloudflare account and supply its `account_id` to `execute` when required by the upstream server. A local connection ID selects a credential and a Cloudflare account ID selects a resource namespace.
 
-This prints the resolved `mcp-remote` proxy path and the auth directory, then exits without starting OAuth.
+Name the connection, zone, record, and intended change in your prompt.
+
+> Use the `staging` Cloudflare connection. In the intended Cloudflare account, find the `example.com` zone and show the current A record for `app.example.com`. Update that specific record to `192.0.2.10`, keeping its TTL and proxy setting, and read it back to verify the change.
+
+For DNS management, grant **Zone Read** to discover the zone and **DNS Write** to create, update, or delete its records. Add **Zone Write** to create or manage the zone itself. Workers, storage, cache, SSL/TLS, and other products use their own scopes. Use `search` to check the permission for the selected endpoint. [API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) · [DNS API](https://developers.cloudflare.com/api/resources/dns/subresources/records/)
+
+Cloudflare treats hosted zones and Registrar registrations as separate resources. A zone’s settings can be changed through the zone API. Moving to a different domain name requires managing a separate zone. Registrar operations use the current `/registrar/registrations` API and require a supported user-scoped credential. The current registration update endpoint supports `auto_renew`. [Zone API](https://developers.cloudflare.com/api/resources/zones/) · [Registrar API](https://developers.cloudflare.com/api/resources/registrar/) · [Account token compatibility](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/#compatibility-matrix)
 
 ## License
 
-MIT
+[MIT](LICENSE)

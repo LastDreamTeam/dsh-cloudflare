@@ -1,16 +1,3 @@
-# Official Cloudflare API MCP via the installed mcp-remote dependency (browser OAuth).
-# Tokens are stored under the user's home directory at ~/.mcp-auth/cloudflare-api.
 - insert:
-    - id: mcp-cloudflare-api
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: cfapi
-        transport: stdio
-        command: !!js process.execPath
-        args:
-          - !!js ctx.get('profileContext').dir + '/node_modules/dsh-cloudflare-api-mcp/bin/launch.mjs'
-        env:
-          ELECTRON_RUN_AS_NODE: '1'
-        toolCallTimeoutMs: 120000
-        startupTimeoutMs: 630000
-        failOnStartupError: false
+    - id: cloudflare
+      name: dsh-cloudflare

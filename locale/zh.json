@@ -1,1 +1,6 @@
-{ "meta": { "title": "Cloudflare API MCP", "description": "连接 Cloudflare 官方 API MCP（DNS、Workers、R2 等），首次在浏览器登录授权。" } }
+{
+  "meta": {
+    "title": "Cloudflare",
+    "description": "绑定多个 Cloudflare 账号，授权 Agent 管理域名、DNS、Workers、R2 等 Cloudflare 资源。"
+  }
+}

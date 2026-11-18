@@ -1,18 +1,20 @@
 {
-  "name": "dsh-cloudflare-api-mcp",
-  "version": "1.0.0",
+  "name": "dsh-cloudflare",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Connects DeepSeek Harness to the official Cloudflare API MCP (DNS, Workers, R2 and more) with browser OAuth.",
+  "description": "Connect multiple Cloudflare accounts to DeepSeek Harness and manage DNS, domains, Workers, R2, and more through Cloudflare's official MCP.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LastDreamTeam/dsh-cloudflare-api-mcp.git"
+    "url": "git+https://github.com/LastDreamTeam/dsh-cloudflare.git"
   },
-  "homepage": "https://github.com/LastDreamTeam/dsh-cloudflare-api-mcp#readme",
+  "homepage": "https://github.com/LastDreamTeam/dsh-cloudflare#readme",
   "bugs": {
-    "url": "https://github.com/LastDreamTeam/dsh-cloudflare-api-mcp/issues"
+    "url": "https://github.com/LastDreamTeam/dsh-cloudflare/issues"
   },
   "exports": {
+    ".": "./src/index.mjs",
+    "./client": "./src/client.mjs",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
@@ -21,21 +23,31 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "bin/launch.mjs"
+    "src/*.mjs",
+    "README.zh.md"
   ],
-  "bin": {
-    "dsh-cloudflare-api-mcp": "bin/launch.mjs"
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "scripts": {
+    "test": "node --test"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": ["@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-settings"]
     }
   },
   "dependencies": {
-    "mcp-remote": "^0.16.6"
+    "@modelcontextprotocol/sdk": "1.32.2"
   },
   "keywords": [
     "dsh",
+    "dsh-plugin",
     "deepseek-harness",
     "cloudflare",
     "mcp",
