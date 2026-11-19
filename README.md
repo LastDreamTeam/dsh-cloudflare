@@ -4,6 +4,14 @@
 
 `dsh-cloudflare` connects DeepSeek Harness (DSH) to the official Cloudflare API MCP server. Bind multiple Cloudflare identities in DSH settings, then let the Agent manage zones, DNS, Workers, R2, and other Cloudflare resources through the permissions granted to each connection. [Cloudflare API MCP](https://github.com/cloudflare/mcp)
 
+## First connection check
+
+After installing the plugin and linking an identity in **Settings → Cloudflare**, try this in DSH:
+
+> List my configured Cloudflare connections. For the one I choose, show which identity is signed in. Leave the DNS records as they are.
+
+The Agent can list local connections with `mcp__cfapi__list_connections` and confirm the selected identity with `mcp__cfapi__whoami`. If two connections use the same email or lead to several Cloudflare accounts, use the connection ID in DSH to choose the credential. When working with resources, also check the target account or zone. The [DNS example below](#use-with-an-agent) walks through a scoped change.
+
 ## Install
 
 1. Open **Plugins → Add plugin** in DSH Desktop.
